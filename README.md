@@ -1,6 +1,9 @@
+# Kiro example project:
 # EC2 Auto-Shutdown Lambda Function
 
 AWS Lambda function that automatically shuts down EC2 instances based on tags.
+
+Default setting: if EC2 instance tag is AutoShutdown=yes then the instance will be included in the daily autoshutdown rule.
 
 ## Project Structure
 
@@ -25,4 +28,4 @@ AWS Lambda function that automatically shuts down EC2 instances based on tags.
 
 ## Deployment
 
-To be documented in later implementation phases.
+Default: use AWS SAM by invoking `./deploy.sh`
