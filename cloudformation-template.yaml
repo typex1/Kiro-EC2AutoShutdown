@@ -1,0 +1,318 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "EC2 Auto-Shutdown Lambda Function - CloudFormation Template"
+
+Parameters:
+  ShutdownTagKey:
+    Type: String
+    Default: AutoShutdown
+    Description: "Tag key to identify instances for shutdown"
+
+  ShutdownTagValue:
+    Type: String
+    Default: "yes"
+    Description: "Tag value to identify instances for shutdown"
+
+  ScheduleExpression:
+    Type: String
+    Default: "cron(0 18 * * 1-5)"
+    Description: "Schedule expression for automatic execution (default: 6 PM weekdays UTC)"
+
+  LambdaCodeS3Bucket:
+    Type: String
+    Description: "S3 bucket containing the Lambda deployment package"
+
+  LambdaCodeS3Key:
+    Type: String
+    Default: "ec2-auto-shutdown.zip"
+    Description: "S3 key for the Lambda deployment package"
+
+Resources:
+  # IAM Role for Lambda Function
+  EC2AutoShutdownRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-EC2AutoShutdownRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: EC2AutoShutdownPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:StopInstances
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    "aws:RequestedRegion": !Ref "AWS::Region"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/ec2-auto-shutdown"
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/ec2-auto-shutdown:*"
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    "cloudwatch:namespace": "EC2AutoShutdown"
+
+  # CloudWatch Log Group
+  EC2AutoShutdownLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/ec2-auto-shutdown
+      RetentionInDays: 30
+
+  # Lambda Function
+  EC2AutoShutdownFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: ec2-auto-shutdown
+      Runtime: python3.9
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt EC2AutoShutdownRole.Arn
+      Code:
+        S3Bucket: !Ref LambdaCodeS3Bucket
+        S3Key: !Ref LambdaCodeS3Key
+      Description: "Automatically shutdown EC2 instances based on tags"
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          SHUTDOWN_TAG_KEY: !Ref ShutdownTagKey
+          SHUTDOWN_TAG_VALUE: !Ref ShutdownTagValue
+      DeadLetterConfig:
+        TargetArn: !GetAtt EC2AutoShutdownDLQ.Arn
+
+  # Dead Letter Queue for failed executions
+  EC2AutoShutdownDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${AWS::StackName}-ec2-auto-shutdown-dlq"
+      MessageRetentionPeriod: 1209600 # 14 days
+
+  # EventBridge Rule for scheduled execution
+  EC2AutoShutdownScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${AWS::StackName}-ec2-auto-shutdown-schedule"
+      Description: "Scheduled execution of EC2 auto-shutdown"
+      ScheduleExpression: !Ref ScheduleExpression
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt EC2AutoShutdownFunction.Arn
+          Id: EC2AutoShutdownTarget
+
+  # Permission for EventBridge to invoke Lambda
+  EC2AutoShutdownSchedulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref EC2AutoShutdownFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt EC2AutoShutdownScheduleRule.Arn
+
+  # CloudWatch Alarm for function errors
+  EC2AutoShutdownErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-EC2AutoShutdown-Errors"
+      AlarmDescription: "Alert when EC2 Auto-Shutdown function has errors"
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref EC2AutoShutdownFunction
+      TreatMissingData: notBreaching
+
+  # CloudWatch Alarm for function duration
+  EC2AutoShutdownDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-EC2AutoShutdown-Duration"
+      AlarmDescription: "Alert when EC2 Auto-Shutdown function duration is high"
+      MetricName: Duration
+      Namespace: AWS/Lambda
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 240000 # 4 minutes (80% of 5-minute timeout)
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref EC2AutoShutdownFunction
+      TreatMissingData: notBreaching
+
+  # CloudWatch Alarm for function throttles
+  EC2AutoShutdownThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-EC2AutoShutdown-Throttles"
+      AlarmDescription: "Alert when EC2 Auto-Shutdown function is being throttled"
+      MetricName: Throttles
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref EC2AutoShutdownFunction
+      TreatMissingData: notBreaching
+
+  # CloudWatch Alarm for custom metric - instances processed
+  EC2AutoShutdownInstancesProcessedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-EC2AutoShutdown-NoInstancesProcessed"
+      AlarmDescription: "Alert when no instances are being processed (potential configuration issue)"
+      MetricName: InstancesProcessed
+      Namespace: EC2AutoShutdown
+      Statistic: Sum
+      Period: 86400 # 24 hours
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: ec2-auto-shutdown
+      TreatMissingData: breaching
+
+  # CloudWatch Alarm for custom metric - error rate
+  EC2AutoShutdownErrorRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-EC2AutoShutdown-HighErrorRate"
+      AlarmDescription: "Alert when error rate is high for EC2 Auto-Shutdown"
+      MetricName: ErrorCount
+      Namespace: EC2AutoShutdown
+      Statistic: Sum
+      Period: 3600 # 1 hour
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: ec2-auto-shutdown
+      TreatMissingData: notBreaching
+
+  # CloudWatch Dashboard for monitoring
+  EC2AutoShutdownDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "${AWS::StackName}-EC2AutoShutdown-Dashboard"
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "EC2AutoShutdown", "InstancesProcessed", "FunctionName", "ec2-auto-shutdown" ],
+                  [ ".", "InstancesStopped", ".", "." ],
+                  [ ".", "InstancesSkipped", ".", "." ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "EC2 Auto-Shutdown - Instance Metrics",
+                "period": 300,
+                "stat": "Sum"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/Lambda", "Duration", "FunctionName", "${EC2AutoShutdownFunction}" ],
+                  [ ".", "Invocations", ".", "." ],
+                  [ ".", "Errors", ".", "." ],
+                  [ ".", "Throttles", ".", "." ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Lambda Function Metrics",
+                "period": 300
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 6,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "EC2AutoShutdown", "ErrorCount", "FunctionName", "ec2-auto-shutdown" ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Error Count",
+                "period": 300,
+                "stat": "Sum"
+              }
+            },
+            {
+              "type": "log",
+              "x": 12,
+              "y": 6,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "query": "SOURCE '/aws/lambda/ec2-auto-shutdown'\n| fields @timestamp, @message\n| filter @message like /ERROR/\n| sort @timestamp desc\n| limit 20",
+                "region": "${AWS::Region}",
+                "title": "Recent Errors",
+                "view": "table"
+              }
+            }
+          ]
+        }
+
+Outputs:
+  EC2AutoShutdownFunctionArn:
+    Description: "EC2 Auto-Shutdown Lambda Function ARN"
+    Value: !GetAtt EC2AutoShutdownFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-EC2AutoShutdownFunction"
+
+  EC2AutoShutdownFunctionName:
+    Description: "EC2 Auto-Shutdown Lambda Function Name"
+    Value: !Ref EC2AutoShutdownFunction
+    Export:
+      Name: !Sub "${AWS::StackName}-EC2AutoShutdownFunctionName"
+
+  EC2AutoShutdownRoleArn:
+    Description: "EC2 Auto-Shutdown IAM Role ARN"
+    Value: !GetAtt EC2AutoShutdownRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-EC2AutoShutdownRole"

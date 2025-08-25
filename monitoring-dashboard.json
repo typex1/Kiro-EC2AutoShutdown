@@ -1,0 +1,274 @@
+{
+  "widgets": [
+    {
+      "type": "text",
+      "x": 0,
+      "y": 0,
+      "width": 24,
+      "height": 2,
+      "properties": {
+        "markdown": "# EC2 Auto-Shutdown Lambda Monitoring Dashboard\n\nThis dashboard provides comprehensive monitoring for the EC2 Auto-Shutdown Lambda function, including custom metrics, AWS Lambda metrics, and operational insights."
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 2,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [ "EC2AutoShutdown", "InstancesProcessed", "FunctionName", "ec2-auto-shutdown", { "stat": "Sum" } ],
+          [ ".", "InstancesStopped", ".", ".", { "stat": "Sum" } ],
+          [ ".", "InstancesSkipped", ".", ".", { "stat": "Sum" } ]
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "us-east-1",
+        "title": "Instance Processing Metrics",
+        "period": 300,
+        "yAxis": {
+          "left": {
+            "min": 0
+          }
+        },
+        "annotations": {
+          "horizontal": [
+            {
+              "label": "Expected minimum instances",
+              "value": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 2,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [ "AWS/Lambda", "Duration", "FunctionName", "ec2-auto-shutdown" ],
+          [ ".", "Invocations", ".", "." ],
+          [ ".", "Errors", ".", "." ],
+          [ ".", "Throttles", ".", "." ]
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "us-east-1",
+        "title": "Lambda Function Performance",
+        "period": 300,
+        "annotations": {
+          "horizontal": [
+            {
+              "label": "Duration threshold (4 min)",
+              "value": 240000
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 8,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [ "EC2AutoShutdown", "ErrorCount", "FunctionName", "ec2-auto-shutdown" ]
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "us-east-1",
+        "title": "Error Count",
+        "period": 300,
+        "stat": "Sum",
+        "yAxis": {
+          "left": {
+            "min": 0
+          }
+        },
+        "annotations": {
+          "horizontal": [
+            {
+              "label": "Error threshold",
+              "value": 5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 8,
+      "y": 8,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [ "AWS/Lambda", "ConcurrentExecutions", "FunctionName", "ec2-auto-shutdown" ],
+          [ ".", "Throttles", ".", "." ]
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "us-east-1",
+        "title": "Concurrency and Throttles",
+        "period": 300
+      }
+    },
+    {
+      "type": "metric",
+      "x": 16,
+      "y": 8,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [ "EC2AutoShutdown", "InstancesProcessed", "FunctionName", "ec2-auto-shutdown", { "stat": "Sum" } ],
+          [ ".", "InstancesStopped", ".", ".", { "stat": "Sum" } ]
+        ],
+        "view": "singleValue",
+        "region": "us-east-1",
+        "title": "Daily Totals",
+        "period": 86400,
+        "stat": "Sum",
+        "setPeriodToTimeRange": true
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 14,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [ "EC2AutoShutdown/Detailed", "SuccessfulShutdowns", { "stat": "Sum" } ],
+          [ ".", "PermissionErrors", { "stat": "Sum" } ],
+          [ ".", "APIThrottling", { "stat": "Sum" } ]
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "us-east-1",
+        "title": "Detailed Operation Metrics",
+        "period": 300
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 14,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [ "AWS/Lambda", "Duration", "FunctionName", "ec2-auto-shutdown", { "stat": "Average" } ],
+          [ "...", { "stat": "Maximum" } ],
+          [ "...", { "stat": "Minimum" } ]
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "us-east-1",
+        "title": "Function Duration Statistics",
+        "period": 300,
+        "yAxis": {
+          "left": {
+            "min": 0,
+            "max": 300000
+          }
+        }
+      }
+    },
+    {
+      "type": "log",
+      "x": 0,
+      "y": 20,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "query": "SOURCE '/aws/lambda/ec2-auto-shutdown'\n| fields @timestamp, @message\n| filter @message like /ERROR/\n| sort @timestamp desc\n| limit 20",
+        "region": "us-east-1",
+        "title": "Recent Errors",
+        "view": "table"
+      }
+    },
+    {
+      "type": "log",
+      "x": 12,
+      "y": 20,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "query": "SOURCE '/aws/lambda/ec2-auto-shutdown'\n| fields @timestamp, @message\n| filter @message like /Successfully stopped instance/\n| sort @timestamp desc\n| limit 10",
+        "region": "us-east-1",
+        "title": "Recent Instance Shutdowns",
+        "view": "table"
+      }
+    },
+    {
+      "type": "log",
+      "x": 0,
+      "y": 26,
+      "width": 24,
+      "height": 6,
+      "properties": {
+        "query": "SOURCE '/aws/lambda/ec2-auto-shutdown'\n| fields @timestamp, @message\n| filter @message like /EC2 auto-shutdown process completed/\n| parse @message /processedInstances.*?(\\d+)/\n| parse @message /stoppedInstances.*?(\\d+)/\n| parse @message /errors.*?(\\d+)/\n| stats sum(processedInstances) as TotalProcessed, sum(stoppedInstances) as TotalStopped, sum(errors) as TotalErrors by bin(1h)\n| sort @timestamp desc",
+        "region": "us-east-1",
+        "title": "Hourly Processing Summary",
+        "view": "table"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 32,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [ "AWS/Lambda", "MemoryUtilization", "FunctionName", "ec2-auto-shutdown" ]
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "us-east-1",
+        "title": "Memory Utilization",
+        "period": 300,
+        "yAxis": {
+          "left": {
+            "min": 0,
+            "max": 100
+          }
+        },
+        "annotations": {
+          "horizontal": [
+            {
+              "label": "High utilization threshold",
+              "value": 80
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 32,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [ "AWS/Lambda", "InitDuration", "FunctionName", "ec2-auto-shutdown" ]
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "us-east-1",
+        "title": "Cold Start Duration",
+        "period": 300,
+        "stat": "Average"
+      }
+    }
+  ]
+}

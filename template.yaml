@@ -1,0 +1,163 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: EC2 Auto-Shutdown Lambda Function
+
+Parameters:
+  ShutdownTagKey:
+    Type: String
+    Default: AutoShutdown
+    Description: 'Tag key to identify instances for shutdown'
+  
+  ShutdownTagValue:
+    Type: String
+    Default: "yes"
+    Description: 'Tag value to identify instances for shutdown'
+  
+  ScheduleExpression:
+    Type: String
+    Default: "cron(0 18 ? * MON-FRI *)"
+    Description: 'Schedule expression for automatic execution (default: 6 PM weekdays UTC)'
+
+Globals:
+  Function:
+    Timeout: 300
+    MemorySize: 256
+    Runtime: python3.9
+
+Resources:
+  EC2AutoShutdownFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: ec2-auto-shutdown
+      CodeUri: src/
+      Handler: lambda_function.lambda_handler
+      Description: 'Automatically shutdown EC2 instances based on tags'
+      Environment:
+        Variables:
+          SHUTDOWN_TAG_KEY: !Ref ShutdownTagKey
+          SHUTDOWN_TAG_VALUE: !Ref ShutdownTagValue
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - ec2:DescribeInstances
+                - ec2:StopInstances
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  "aws:RequestedRegion": !Ref "AWS::Region"
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: 
+                - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/ec2-auto-shutdown"
+                - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/ec2-auto-shutdown:*"
+            - Effect: Allow
+              Action:
+                - cloudwatch:PutMetricData
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  "cloudwatch:namespace": "EC2AutoShutdown"
+      Events:
+        ScheduledShutdown:
+          Type: Schedule
+          Properties:
+            Schedule: !Ref ScheduleExpression
+            Description: 'Scheduled execution of EC2 auto-shutdown'
+            Enabled: true
+
+  # CloudWatch Log Group with retention policy
+  EC2AutoShutdownLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/ec2-auto-shutdown
+      RetentionInDays: 30
+
+  # CloudWatch Alarm for function errors
+  EC2AutoShutdownErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: EC2AutoShutdown-Errors
+      AlarmDescription: 'Alert when EC2 Auto-Shutdown function has errors'
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref EC2AutoShutdownFunction
+      TreatMissingData: notBreaching
+
+  # CloudWatch Alarm for function duration
+  EC2AutoShutdownDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: EC2AutoShutdown-Duration
+      AlarmDescription: 'Alert when EC2 Auto-Shutdown function duration is high'
+      MetricName: Duration
+      Namespace: AWS/Lambda
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 240000  # 4 minutes (80% of 5-minute timeout)
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref EC2AutoShutdownFunction
+      TreatMissingData: notBreaching
+
+  # CloudWatch Alarm for custom metric - instances processed
+  EC2AutoShutdownInstancesProcessedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: EC2AutoShutdown-NoInstancesProcessed
+      AlarmDescription: 'Alert when no instances are being processed'
+      MetricName: InstancesProcessed
+      Namespace: EC2AutoShutdown
+      Statistic: Sum
+      Period: 86400  # 24 hours
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: ec2-auto-shutdown
+      TreatMissingData: breaching
+
+  # CloudWatch Alarm for custom metric - error rate
+  EC2AutoShutdownErrorRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: EC2AutoShutdown-HighErrorRate
+      AlarmDescription: 'Alert when error rate is high'
+      MetricName: ErrorCount
+      Namespace: EC2AutoShutdown
+      Statistic: Sum
+      Period: 3600  # 1 hour
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: ec2-auto-shutdown
+      TreatMissingData: notBreaching
+
+Outputs:
+  EC2AutoShutdownFunction:
+    Description: 'EC2 Auto-Shutdown Lambda Function ARN'
+    Value: !GetAtt EC2AutoShutdownFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-EC2AutoShutdownFunction"
+  
+  EC2AutoShutdownFunctionName:
+    Description: 'EC2 Auto-Shutdown Lambda Function Name'
+    Value: !Ref EC2AutoShutdownFunction
+    Export:
+      Name: !Sub "${AWS::StackName}-EC2AutoShutdownFunctionName"

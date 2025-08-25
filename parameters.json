@@ -1,0 +1,22 @@
+[
+  {
+    "ParameterKey": "ShutdownTagKey",
+    "ParameterValue": "AutoShutdown"
+  },
+  {
+    "ParameterKey": "ShutdownTagValue", 
+    "ParameterValue": "yes"
+  },
+  {
+    "ParameterKey": "ScheduleExpression",
+    "ParameterValue": "cron(0 18 * * MON-FRI *)"
+  },
+  {
+    "ParameterKey": "LambdaCodeS3Bucket",
+    "ParameterValue": "your-deployment-bucket"
+  },
+  {
+    "ParameterKey": "LambdaCodeS3Key",
+    "ParameterValue": "ec2-auto-shutdown.zip"
+  }
+]
